@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <style>
+        body {
+            margin: 0;
+            font: 14px sans-serif;
+        }
+
+        .modes {
+            display: flex;
+            padding: 20px;
+        }
+
+        .mode {
+            padding: 8px 16px;
+            background-color: #eee;
+            border: none;
+            border-top: 1px solid #ddd;
+            border-bottom: 1px solid #ddd;
+            border-left: 1px solid #ddd;
+            color: #aaa;
+        }
+
+        .mode:first-child {
+            border-top-left-radius: 4px;
+            border-bottom-left-radius: 4px;
+
+        }
+
+        .mode:last-child {
+            border-right: 1px solid #ddd;
+            border-top-right-radius: 4px;
+            border-bottom-right-radius: 4px;
+        }
+
+        .mode.active {
+            color: #333;
+            box-shadow: inset 0 0 6px rgba(0, 0, 0, 0.25);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="modes">
+        <button class="mode active" id="all" data-mode="all">All Spending</button>
+        <button class="mode" id="types" data-mode="types">Types of Spending</button>
+    </div>
+
+
+    <script type="module">
+        import * as d3 from "https://esm.sh/d3"
+        import { budgetArrayData, categoryList, categoryData } from "./data/obama-budget.js"
+        const width = 970;
+        const height = 850;
+        let centerX = width / 2;
+        let centerY = 300;
+        const alpha = 0.08;
+        const defaultGravity = 0.1;
+        const positionForceStrength = 0.2;
+        const collideStrength = 1.5;
+        const MANDATORY = "Mandatory";
+        const DISCRETIONARY = "Discretionary";
+        let mode = "all";
+
+        const categorizeChange = (c) => {
+            if (isNaN(c)) {
+                return 0;
+            } else if (c < -0.25) {
+                return -3;
+            } else if (c < -0.05) {
+                return -2;
+            } else if (c < -0.001) {
+                return -1;
+            } else if (c <= 0.001) {
+                return 0;
+            } else if (c <= 0.05) {
+                return 1;
+            } else if (c <= 0.25) {
+                return 2;
+            } else {
+                return 3;
+            }
+        }
+
+        const fillColor = d3.scaleOrdinal()
+            .domain([-3, -2, -1, 0, 1, 2, 3])
+            .range([
+                "#d84b2a",
+                "#ee9586",
+                "#e4b7b2",
+                "#AAA",
+                "#beccae",
+                "#9caf84",
+                "#7aa25c",
+            ]);
+
+        const rScale = d3.scalePow().domain([0, 1000000000]).range([1, 90]).exponent(0.5);
+
+        const nodes = budgetArrayData.filter(d => d.budget_2013 > 80_000).map(d => {
+            const out = {
+                radius: rScale(Math.abs(d.budget_2013)),
+                group: d.department,
+                change: d.change,
+                value: d.budget_2013,
+                isNegative: d.budget_2013 < 0,
+                x: Math.random() * 1000,
+                y: Math.random() * 1000,
+                discretion: d.discretion
+            }
+            return out;
+        });
+        console.log(nodes.length)
+
+
+        const svg = d3.select("body").append("svg").attr("width", width).attr("height", height);
+
+        const simulation = d3.forceSimulation(nodes)
+            .alpha(alpha)
+            .alphaDecay(0.002)
+            .velocityDecay(0.4)
+            .force("x", d3.forceX(width / 2).strength(positionForceStrength))
+            .force("y", d3.forceY(height / 2).strength(positionForceStrength))
+            // .force("center", d3.forceCenter(width / 2, height / 2).strength(1.5))
+            // .force("charge", d3.forceManyBody().strength(20))
+            .force("collide", d3.forceCollide(d => d.radius + 0.8).strength(collideStrength).iterations(20))
+
+        const node = svg.append("g")
+            .selectAll("circle")
+            .data(nodes)
+            .join("circle")
+            .attr("r", d => d.radius)
+            .attr("fill", d => fillColor(categorizeChange(d.change)))
+            .attr("cx", width / 2)
+            .attr("cy", height / 2)
+
+        simulation.on("tick", () => {
+            node.attr("cx", d => d.x).attr("cy", d => d.y)
+        })
+
+        const totalSort = (alpha) => {
+            return (d) => {
+                const targetY = centerY;
+                const targetX = width / 2;
+
+                d.y = d.y + (targetY - d.y) * (defaultGravity + 0.02) * alpha;
+                d.x = d.x + (targetX - d.x) * (defaultGravity + 0.02) * alpha;
+            }
+        }
+
+        const changeMode = (newMode) => {
+            mode = newMode;
+            if (mode === "all") {
+                simulation.force("x", d3.forceX(width / 2).strength(positionForceStrength))
+                simulation.force("y", d3.forceY(height / 2).strength(positionForceStrength))
+                simulation.alpha(alpha)
+                simulation.restart();
+            } else if (mode === "types") {
+                simulation.force("x", d3.forceX(width / 2).x(d => d.discretion === MANDATORY ? 200 : 600).strength(positionForceStrength))
+                simulation.force("y", d3.forceY(height / 2).strength(positionForceStrength))
+                simulation.alpha(alpha)
+                simulation.restart();
+
+            }
+        }
+
+        const updateButtons = () => {
+            document.querySelectorAll('.mode').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.querySelector(`.mode[data-mode=${mode}]`).classList.add('active');
+        }
+
+        document.querySelectorAll('.mode').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const newMode = btn.dataset.mode;
+                changeMode(newMode);
+                updateButtons();
+
+            })
+        })
+
+    </script>
+</body>
+
+</html>
